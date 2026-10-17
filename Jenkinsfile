@@ -1,0 +1,25 @@
+
+pipeline {
+    agent any
+#jeninsfile124
+    stages {
+        stage('checkout-stage') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/agashevishwas189-creator/jenkins-practies.git'
+            }
+        }
+
+        stage('build-stage') {
+            steps {
+                sh 'echo "Build stage"'
+            }
+        }
+
+        stage('test-stage') {
+            steps {
+                sh 'echo "Test stage"'
+            }
+        }
+    }
+}
