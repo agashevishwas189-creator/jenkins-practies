@@ -1,7 +1,7 @@
 
 pipeline {
     agent any
-#jeninsfile124
+
     stages {
         stage('checkout-stage') {
             steps {
@@ -15,7 +15,6 @@ pipeline {
                 sh 'echo "Build stage"'
             }
         }
-
         stage('test-stage') {
             steps {
                 sh 'echo "Test stage"'
