@@ -1,7 +1,11 @@
 
 pipeline {
     agent any
-
+    
+   environment {
+        APP_NAME = 'MyApp'
+        ENVIRONMENT = 'main'
+    }
     stages {
         stage('checkout-stage') {
             steps {
@@ -21,4 +25,9 @@ pipeline {
             }
         }
     }
+     post {
+        always {
+            echo 'Pipeline execution completed'
+        }
+     }     
 }
