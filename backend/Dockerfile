@@ -6,6 +6,7 @@ COPY package.json ./
 RUN npm install --omit=dev
 
 COPY src ./src
+COPY global-bundle.pem ./global-bundle.pem
 
 ENV NODE_ENV=production
 EXPOSE 5000

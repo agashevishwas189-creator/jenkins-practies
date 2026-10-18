@@ -1,14 +1,21 @@
+
 services:
   backend:
-    build: ./backend
+    image: agashevishwas/job-portal-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
-      PORT: 5000
+      PORT: "5000"
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-jobportal}
+      DB_SSL_CA: /app/global-bundle.pem
     expose:
       - "5000"
 
   frontend:
-    build: ./frontend
+    image: agashevishwas/job-portal-frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "8081:80"
