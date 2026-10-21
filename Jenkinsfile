@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -11,8 +10,7 @@ pipeline {
     environment {
         FRONTEND_IMAGE = 'agashevishwas/job-portal-frontend'
         BACKEND_IMAGE  = 'agashevishwas/job-portal-backend'
-        COMPOSE_PROJECT_NAME = 'jenkins-practies'
-        DEPLOY_ENV_FILE = '/etc/job-portal/production.env'
+        KUBECONFIG = '/var/lib/jenkins/.kube/config'
     }
 
     stages {
@@ -28,24 +26,22 @@ pipeline {
                     set -eu
 
                     test -f Jenkinsfile
-                    test -f docker-compose.yml
                     test -f frontend/Dockerfile
                     test -f frontend/package.json
                     test -f backend/Dockerfile
                     test -f backend/package.json
                     test -f backend/src/server.js
                     test -f backend/global-bundle.pem
+                    test -f k8s/backend.yml
+                    test -f k8s/frontend.yml
+                    test -f k8s/ingress.yml
                     test ! -f .env
 
-                    echo "Project validation successful."
-                '''
-
-                sh '''
-                    set -eu
                     docker --version
-                    docker compose version
-                    test -r "$DEPLOY_ENV_FILE"
-                    echo "Docker and deployment configuration available."
+                    kubectl version --client
+                    test -r "$KUBECONFIG"
+
+                    echo "Project validation successful."
                 '''
             }
         }
@@ -55,19 +51,15 @@ pipeline {
                 sh '''
                     set -eu
 
-                    docker build \
-                      --pull \
+                    docker build --pull \
                       -t "$FRONTEND_IMAGE:$BUILD_NUMBER" \
-                      -t "$FRONTEND_IMAGE:latest" \
                       ./frontend
 
-                    docker build \
-                      --pull \
+                    docker build --pull \
                       -t "$BACKEND_IMAGE:$BUILD_NUMBER" \
-                      -t "$BACKEND_IMAGE:latest" \
                       ./backend
 
-                    echo "Docker images built successfully."
+                    echo "Images built successfully."
                 '''
             }
         }
@@ -94,83 +86,58 @@ pipeline {
 
                         docker push "$FRONTEND_IMAGE:$BUILD_NUMBER"
                         docker push "$BACKEND_IMAGE:$BUILD_NUMBER"
-
-                        docker push "$FRONTEND_IMAGE:latest"
-                        docker push "$BACKEND_IMAGE:latest"
-
-                        echo "Images pushed successfully."
                     '''
                 }
             }
         }
 
-        stage('Deploy to EC2') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-creds',
-                        usernameVariable: 'DOCKERHUB_USER',
-                        passwordVariable: 'DOCKERHUB_TOKEN'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-                        set +x
-
-                        export IMAGE_TAG="$BUILD_NUMBER"
-
-                        echo "$DOCKERHUB_TOKEN" |
-                          docker login \
-                            --username "$DOCKERHUB_USER" \
-                            --password-stdin
-
-                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
-
-                        docker compose \
-                          --project-name "$COMPOSE_PROJECT_NAME" \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          pull
-
-                        docker compose \
-                          --project-name "$COMPOSE_PROJECT_NAME" \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          up -d --no-build --remove-orphans
-
-                        echo "Deployment commands completed."
-                    '''
-                }
-            }
-        }
-
-        stage('Verify Deployment') {
+        stage('Deploy to K3s') {
             steps {
                 sh '''
                     set -eu
+                    export KUBECONFIG=/var/lib/jenkins/.kube/config
 
-                    echo "Waiting for application startup..."
-                    sleep 5
+                    # Set this build's immutable image tags in manifests.
+                    sed -i \
+                      "s|image: agashevishwas/job-portal-backend:latest|image: agashevishwas/job-portal-backend:$BUILD_NUMBER|" \
+                      k8s/backend.yml
 
-                    docker compose \
-                      --project-name "$COMPOSE_PROJECT_NAME" \
-                      --env-file "$DEPLOY_ENV_FILE" \
-                      ps
+                    sed -i \
+                      "s|image: agashevishwas/job-portal-frontend:latest|image: agashevishwas/job-portal-frontend:$BUILD_NUMBER|" \
+                      k8s/frontend.yml
 
-                    echo "Checking application and RDS health..."
+                    kubectl apply -f k8s/backend.yml
+                    kubectl apply -f k8s/frontend.yml
+                    kubectl apply -f k8s/ingress.yml
 
-                    curl --fail --silent --show-error \
-                      --retry 6 \
-                      --retry-delay 5 \
-                      --retry-connrefused \
-                      http://localhost:8081/api/health
+                    kubectl set image deployment/backend \
+                      backend="$BACKEND_IMAGE:$BUILD_NUMBER"
 
-                    echo ""
+                    kubectl set image deployment/frontend \
+                      frontend="$FRONTEND_IMAGE:$BUILD_NUMBER"
 
-                    echo "Checking jobs API..."
-                    curl --fail --silent --show-error \
-                      http://localhost:8081/api/jobs
+                    echo "Kubernetes deployment applied."
+                '''
+            }
+        }
 
-                    echo ""
-                    echo "Deployment verification successful."
+        stage('Verify Kubernetes Deployment') {
+            steps {
+                sh '''
+                    set -eu
+                    export KUBECONFIG=/var/lib/jenkins/.kube/config
+
+                    kubectl rollout status deployment/backend \
+                      --timeout=180s
+
+                    kubectl rollout status deployment/frontend \
+                      --timeout=180s
+
+                    kubectl get deployments
+                    kubectl get pods
+                    kubectl get ingress
+
+                    echo "Kubernetes rollout verification successful."
                 '''
             }
         }
@@ -178,11 +145,11 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: Build, push, deployment and health checks completed.'
+            echo 'SUCCESS: Images built, pushed and deployed to K3s.'
         }
 
         failure {
-            echo 'FAILED: Inspect the stage logs and fix the reported error.'
+            echo 'FAILED: Check the failed stage logs.'
         }
 
         always {
